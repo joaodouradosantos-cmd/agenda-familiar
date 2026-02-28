@@ -3,7 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-type CategoriaEvento = "Aniversário" | "Consulta" | "Reunião" | "Feriado" | "Férias" | "Jantar" | "Outros";
+// Actualização dos tipos de categoria de eventos para abranger mais situações
+// Inclui agora festas, fins de semana e testes escolares
+type CategoriaEvento =
+  | "Aniversário"
+  | "Consulta"
+  | "Reunião"
+  | "Feriado"
+  | "Férias"
+  | "Jantar"
+  | "Outros"
+  | "Festa"
+  | "Fim de semana"
+  | "Teste";
 
 type DbEvent = {
   id: string;
@@ -46,6 +58,7 @@ export default function CalendarioPage() {
 
   const [msg, setMsg] = useState<string | null>(null);
 
+  // Lista de categorias actualizada para disponibilizar novas opções
   const categorias: CategoriaEvento[] = [
     "Aniversário",
     "Consulta",
@@ -54,6 +67,9 @@ export default function CalendarioPage() {
     "Férias",
     "Jantar",
     "Outros",
+    "Festa",
+    "Fim de semana",
+    "Teste",
   ];
 
   async function loadEvents() {
