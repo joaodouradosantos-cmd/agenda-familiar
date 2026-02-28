@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   title: "Agenda Familiar",
   description: "Organize as tarefas e os eventos da família, com suporte offline.",
   manifest: "/manifest.webmanifest",
-  themeColor: "#fffff"  s,
+  themeColor: "#ffffff",
   appleWebApp: {
     title: "Agenda Familiar",
     statusBarStyle: "default",
