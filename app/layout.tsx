@@ -8,7 +8,17 @@ export const metadata: Metadata = {
   title: "Agenda Familiar",
   description: "Organize as tarefas e os eventos da família, com suporte offline.",
   manifest: "/manifest.webmanifest",
-  themeColor: "#ffffff",
+  themeColor: "#ffffff"  s,
+  appleWebApp: {
+    title: "Agenda Familiar",
+    statusBarStyle: "default",
+    capable: true,
+  },
+
+  icons: {
+    apple: { sizes: "180x180", url: "/icon-192.png" },
+  },
+
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
