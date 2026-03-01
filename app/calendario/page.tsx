@@ -1,11 +1,17 @@
+
 "use client";
+
+// Página de calendário com melhorias visuais e correcção de gravação
+// Esta versão chama automaticamente o endpoint de aceitação de convites para garantir
+// que o utilizador está associado à família antes de carregar os eventos. Também
+// aplica um estilo mais moderno usando chips coloridos para cada categoria e
+// organiza o layout com caixas com sombras suaves.
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-// Actualização dos tipos de categoria de eventos para abranger mais situações
-// Inclui agora festas, fins de semana e testes escolares
-type CategoriaEvento =
+// Tipo de categorias de eventos suportados
+export type CategoriaEvento =
   | "Aniversário"
   | "Consulta"
   | "Reunião"
@@ -17,48 +23,26 @@ type CategoriaEvento =
   | "Fim de semana"
   | "Teste";
 
-type DbEvent = {
+// Tipo de evento recebido da base de dados
+export interface DbEvent {
   id: string;
   title: string;
   category: CategoriaEvento;
-  start_at: string; // ISO (timestamptz)
+  start_at: string; // ISO string
   created_at: string;
-};
-
-function toIsoFromLocal(value: string) {
-  // value vem de input datetime-local (sem timezone)
-  const d = new Date(value);
-  const ms = d.getTime();
-  if (!Number.isFinite(ms)) return null;
-  return d.toISOString();
 }
 
-function toLocalInputValue(iso: string) {
-  const d = new Date(iso);
-  const ms = d.getTime();
-  if (!Number.isFinite(ms)) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  const mm = pad(d.getMonth() + 1);
-  const dd = pad(d.getDate());
-  const hh = pad(d.getHours());
-  const mi = pad(d.getMinutes());
-  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
-}
-
-export default function CalendarioPage() {
+export default function CalendarioPageAtualizado() {
   const [loading, setLoading] = useState(true);
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [eventos, setEventos] = useState<DbEvent[]>([]);
-
-  const [titulo, setTitulo] = useState("");
-  const [categoria, setCategoria] = useState<CategoriaEvento>("Aniversário");
-  const [data, setData] = useState("");
-  const [editId, setEditId] = useState<string | null>(null);
-
+  const [novoTitulo, setNovoTitulo] = useState("");
+  const [novaCategoria, setNovaCategoria] = useState<CategoriaEvento>("Aniversário");
+  const [novaDataHora, setNovaDataHora] = useState("");
+  const [filtroCategoria, setFiltroCategoria] = useState<CategoriaEvento | "Todas">("Todas");
   const [msg, setMsg] = useState<string | null>(null);
 
-  // Lista de categorias actualizada para disponibilizar novas opções
+  // Lista de categorias disponíveis
   const categorias: CategoriaEvento[] = [
     "Aniversário",
     "Consulta",
@@ -72,238 +56,235 @@ export default function CalendarioPage() {
     "Teste",
   ];
 
-  async function loadEvents() {
+  // Definição de cores para cada categoria (chips)
+  const categoryColors: Record<CategoriaEvento, string> = {
+    "Aniversário": "bg-red-100 text-red-800",
+    Consulta: "bg-green-100 text-green-800",
+    "Reunião": "bg-blue-100 text-blue-800",
+    Feriado: "bg-yellow-100 text-yellow-800",
+    Férias: "bg-indigo-100 text-indigo-800",
+    Jantar: "bg-pink-100 text-pink-800",
+    Outros: "bg-gray-100 text-gray-800",
+    Festa: "bg-purple-100 text-purple-800",
+    "Fim de semana": "bg-orange-100 text-orange-800",
+    Teste: "bg-teal-100 text-teal-800",
+  };
+
+  // Carrega eventos para a família do utilizador
+  async function loadEventos() {
     setLoading(true);
     setMsg(null);
-
+    // Obtém sessão atual
     const { data: sess } = await supabase.auth.getSession();
     const token = sess.session?.access_token;
-
     if (!token) {
       setLoading(false);
-      setFamilyId(null);
-      setEventos([]);
       setMsg("Sessão não encontrada. Faz login.");
+      setEventos([]);
       return;
     }
-
-    // garante auto-aceitação de convite (idempotente)
-    await fetch("/api/accept-invite", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
+    // Garante que o utilizador está associado à família (auto-aceitação de convite)
+    try {
+      await fetch("/api/accept-invite", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (e) {
+      // Ignora erros de aceitação de convite
+    }
+    // Obtém dados do utilizador incluindo a familyId
     const meRes = await fetch("/api/me", { headers: { Authorization: `Bearer ${token}` } });
     const me = await meRes.json();
-
     if (!me.familyId) {
       setFamilyId(null);
       setEventos([]);
       setLoading(false);
-      setMsg('Família não configurada (NEXT_PUBLIC_FAMILY_ID / FAMILY_ID).');
+      setMsg("Família não configurada (NEXT_PUBLIC_FAMILY_ID / FAMILY_ID).);");
       return;
     }
-
     setFamilyId(me.familyId);
-
+    // Consulta eventos ordenados pela data de início
     const { data, error } = await supabase
       .from("events")
       .select("id, title, category, start_at, created_at")
       .eq("family_id", me.familyId)
-      .order("start_at", { ascending: true })
-      .order("created_at", { ascending: true });
-
+      .order("start_at", { ascending: true });
     if (error) {
       setMsg(error.message);
       setEventos([]);
     } else {
       setEventos((data || []) as DbEvent[]);
     }
-
     setLoading(false);
   }
 
   useEffect(() => {
-    loadEvents();
+    loadEventos();
   }, []);
 
-  const eventosOrdenados = useMemo(() => {
-    return [...eventos].sort((a, b) => a.start_at.localeCompare(b.start_at));
-  }, [eventos]);
+  // Filtra e ordena eventos por data de início
+  const eventosVisiveis = useMemo(() => {
+    const base =
+      filtroCategoria === "Todas"
+        ? eventos
+        : eventos.filter((e) => e.category === filtroCategoria);
+    return [...base].sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
+  }, [eventos, filtroCategoria]);
 
-  const agora = Date.now();
-  const futuros = eventosOrdenados.filter((e) => {
-    const ts = new Date(e.start_at).getTime();
-    return Number.isFinite(ts) ? ts >= agora - 24 * 60 * 60 * 1000 : true; // tolerância 24h
-  });
-
-  async function guardarEvento() {
-    const t = titulo.trim();
-    const iso = data ? toIsoFromLocal(data) : null;
-
-    if (!t || !iso || !familyId) return;
-
+  // Adiciona um novo evento
+  async function adicionarEvento() {
+    const titulo = novoTitulo.trim();
+    if (!titulo || !familyId || !novaDataHora) return;
     setMsg(null);
-
-    if (editId) {
-      const { error } = await supabase
-        .from("events")
-        .update({ title: t, category: categoria, start_at: iso })
-        .eq("id", editId);
-
-      if (error) {
-        setMsg(error.message);
-        return;
-      }
-    } else {
-      const { error } = await supabase.from("events").insert({
-        family_id: familyId,
-        title: t,
-        category: categoria,
-        start_at: iso,
-      });
-
-      if (error) {
-        setMsg(error.message);
-        return;
-      }
+    const { error } = await supabase.from("events").insert({
+      family_id: familyId,
+      title: titulo,
+      category: novaCategoria,
+      start_at: new Date(novaDataHora).toISOString(),
+    });
+    if (error) {
+      setMsg(error.message);
+      return;
     }
-
-    setTitulo("");
-    setData("");
-    setCategoria("Aniversário");
-    setEditId(null);
-
-    await loadEvents();
+    setNovoTitulo("");
+    setNovaDataHora("");
+    setNovaCategoria("Aniversário");
+    await loadEventos();
   }
 
+  // Remove evento por id
   async function removerEvento(id: string) {
     setMsg(null);
     const { error } = await supabase.from("events").delete().eq("id", id);
-    if (error) setMsg(error.message);
-    else await loadEvents();
+    if (error) {
+      setMsg(error.message);
+    } else {
+      await loadEventos();
+    }
   }
 
-  function iniciarEdicao(e: DbEvent) {
-    setEditId(e.id);
-    setTitulo(e.title);
-    setCategoria(e.category);
-    setData(toLocalInputValue(e.start_at));
-  }
-
-  function cancelarEdicao() {
-    setEditId(null);
-    setTitulo("");
-    setCategoria("Aniversário");
-    setData("");
-  }
+  // Calcula estatísticas simples
+  const total = eventos.length;
 
   return (
     <div className="space-y-6">
+      {/* Cabeçalho da página */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Calendário</h1>
-          <p className="text-sm text-gray-600">Eventos partilhados online (família).</p>
+          <p className="text-sm text-gray-600">
+            {total === 0 ? "Sem eventos." : `${total} evento(s) no total.`}
+          </p>
         </div>
-
         <div className="flex gap-2">
-          <button onClick={loadEvents} className="rounded-xl border bg-white px-3 py-2 text-sm hover:bg-gray-50">
+          <button
+            onClick={loadEventos}
+            className="rounded-xl border bg-white px-3 py-2 text-sm shadow-sm hover:bg-gray-50"
+          >
             Atualizar
           </button>
         </div>
       </div>
-
-      {msg && <div className="rounded-xl border bg-white p-3 text-sm">{msg}</div>}
-
-      <section className="rounded-2xl border bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-base font-semibold">{editId ? "Editar evento" : "Adicionar evento"}</h2>
-        <div className="grid gap-2 sm:grid-cols-[1fr_220px_180px_120px]">
-          <input
-            className="w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring"
-            placeholder="Título"
-            value={titulo}
-            onChange={(e) => setTitulo(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") guardarEvento();
-            }}
-          />
-
-          <input
-            className="w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring"
-            type="datetime-local"
-            value={data}
-            onChange={(e) => setData(e.target.value)}
-          />
-
-          <select
-            className="w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring"
-            value={categoria}
-            onChange={(e) => setCategoria(e.target.value as CategoriaEvento)}
-          >
-            {categorias.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-
+      {/* Mensagem de erro ou informação */}
+      {msg && <div className="rounded-xl border bg-white p-3 text-sm shadow-sm">{msg}</div>}
+      {/* Formulário de novo evento */}
+      <div className="rounded-2xl border bg-white p-4 shadow-sm">
+        <div className="grid gap-3 sm:grid-cols-4">
+          <div className="sm:col-span-2">
+            <label className="text-xs font-medium text-gray-700">Título</label>
+            <input
+              value={novoTitulo}
+              onChange={(e) => setNovoTitulo(e.target.value)}
+              placeholder="Ex.: Aniversário do João"
+              className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-700">Categoria</label>
+            <select
+              value={novaCategoria}
+              onChange={(e) => setNovaCategoria(e.target.value as CategoriaEvento)}
+              className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+            >
+              {categorias.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-700">Data e hora</label>
+            <input
+              type="datetime-local"
+              value={novaDataHora}
+              onChange={(e) => setNovaDataHora(e.target.value)}
+              className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+            />
+          </div>
+        </div>
+        <div className="mt-3 flex items-center justify-between">
+          <div className="text-xs text-gray-600">
+            <span className="font-medium">Filtro:</span>{" "}
+            <select
+              value={filtroCategoria}
+              onChange={(e) => setFiltroCategoria(e.target.value as any)}
+              className="rounded-lg border px-2 py-1 text-xs"
+            >
+              <option value="Todas">Todas</option>
+              {categorias.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
           <button
-            onClick={guardarEvento}
-            className="rounded-xl bg-black px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-            disabled={!titulo.trim() || !data || !familyId || loading}
+            onClick={adicionarEvento}
+            className="rounded-xl bg-black px-4 py-2 text-sm text-white shadow-sm hover:opacity-90 disabled:opacity-50"
+            disabled={!novoTitulo.trim() || !familyId || !novaDataHora}
           >
-            {editId ? "Guardar" : "Adicionar"}
+            Adicionar
           </button>
         </div>
-
-        {editId && (
-          <div className="mt-2">
-            <button onClick={cancelarEdicao} className="rounded-xl border bg-white px-3 py-2 text-sm hover:bg-gray-50">
-              Cancelar edição
-            </button>
-          </div>
-        )}
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-base font-semibold">Próximos eventos</h2>
-
+      </div>
+      {/* Lista de eventos */}
+      <div className="rounded-2xl border bg-white p-4 shadow-sm">
         {loading ? (
-          <div className="rounded-2xl border bg-white p-6 text-sm text-gray-600 shadow-sm">A carregar…</div>
-        ) : futuros.length === 0 ? (
-          <div className="rounded-2xl border bg-white p-6 text-sm text-gray-600 shadow-sm">Nenhum evento agendado.</div>
+          <p className="text-sm text-gray-600">A carregar…</p>
+        ) : eventosVisiveis.length === 0 ? (
+          <p className="text-sm text-gray-600">Sem eventos para mostrar.</p>
         ) : (
           <ul className="space-y-2">
-            {futuros.map((e) => (
-              <li key={e.id} className="rounded-2xl border bg-white p-4 shadow-sm">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="font-medium">{e.title}</div>
-                    <div className="mt-1 text-sm text-gray-600">
-                      {e.category} · {new Date(e.start_at).toLocaleString("pt-PT")}
-                    </div>
+            {eventosVisiveis.map((e) => (
+              <li
+                key={e.id}
+                className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2 shadow-sm"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{e.title}</span>
                   </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => iniciarEdicao(e)}
-                      className="w-fit rounded-xl border bg-white px-3 py-2 text-sm hover:bg-gray-50"
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                    <span
+                      className={`inline-block rounded-full px-2 py-0.5 font-medium ${categoryColors[e.category]}`}
                     >
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => removerEvento(e.id)}
-                      className="w-fit rounded-xl border border-red-600 bg-red-600 px-3 py-2 text-sm text-white hover:opacity-90"
-                    >
-                      Remover
-                    </button>
+                      {e.category}
+                    </span>
+                    <span>{new Date(e.start_at).toLocaleString()}</span>
                   </div>
                 </div>
+                <button
+                  onClick={() => removerEvento(e.id)}
+                  className="rounded-xl border bg-white px-3 py-2 text-xs shadow-sm hover:bg-gray-50"
+                >
+                  Remover
+                </button>
               </li>
             ))}
           </ul>
         )}
-      </section>
+      </div>
     </div>
   );
 }
